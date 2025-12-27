@@ -4,10 +4,14 @@ from core.event_queue import EventQueue
 from core.dispatcher import Dispatcher
 
 from events.base import MarketEvent, SignalEvent, OrderEvent, FillEvent
-from strategies.base import OneShotBuyStrategy
+#from strategies.base import OneShotBuyStrategy
+from strategies.mean_reversion import RollingMeanReversionStrategy
 from risk.engine import PassThroughRiskManager
 from execution.simulator import ExecutionHandler
 from portfolio.state import PortfolioState
+
+from analysis.metrics import TradeMetrics
+from analysis.equity_curve import plot_equity_curve
 
 
 # Entry point of trading engine.
@@ -19,12 +23,18 @@ from portfolio.state import PortfolioState
 # Purely exists to instatiate core objects, register handlers with the dispatcher, seed the system with initial events, and run the event-processing loop
 
 def main():
+    
     #core infrastructure
     queue = EventQueue()
     dispatcher = Dispatcher()
 
     #components
-    strategy = OneShotBuyStrategy()
+    #RollingMeanReversionStrategy
+    strategy = RollingMeanReversionStrategy(
+        window = 5,
+        threshold = 2.0,
+        symbol = "APPL"
+    )
     risk = PassThroughRiskManager(fixed_quantity=10)
     execution = ExecutionHandler()
     portfolio = PortfolioState(initial_cash=10000)
@@ -35,16 +45,21 @@ def main():
     dispatcher.register_handler(OrderEvent, execution.handle_order)
     dispatcher.register_handler(FillEvent, portfolio.handle_fill)
 
-    prices = [150.0, 152.0, 151.0, 149.0, 153.0, 155.0]
+    prices = [100, 101, 102, 99, 95, 97, 100, 103, 98, 94, 96, 101]
+    market_events = []
 
     for price in prices:
-        queue.put(
-            MarketEvent(
-                timestamp = datetime.utcnow(),
-                symbol = "APPL",
-                price = price
-            )
+        
+        event = MarketEvent(
+            timestamp = datetime.utcnow(),
+            symbol = "APPL",
+            price = price
         )
+
+        market_events.append(event)
+        queue.put(event)
+        
+        
 
     #event loop
     while not queue.is_empty():
@@ -69,6 +84,22 @@ def main():
     print("Cash:", portfolio.cash)
     print("Positions:", portfolio.positions)
     print("Realized PnL:", portfolio.realized_pnl)
+
+
+    #metrics
+    metrics = TradeMetrics(
+        fills = portfolio.trades,
+        initial_cash = 10_000,
+        final_cash = portfolio.cash,
+    )
+    metrics.summary()
+
+    #equity curve
+    plot_equity_curve(
+        market_events = market_events,
+        fills = portfolio.trades,
+        initial_cash = 10_000,
+    )
 
 
 

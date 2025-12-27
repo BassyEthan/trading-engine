@@ -15,7 +15,7 @@ class PassThroughRiskManager:
 
     def handle_signal(self, event: SignalEvent):
         order = OrderEvent(
-            timestamp = datetime.utcnow(),
+            timestamp = event.timestamp,
             symbol = event.symbol,
             direction = event.direction,
             quantity = self.fixed_quantity,

@@ -16,7 +16,7 @@ class ExecutionHandler:
     def handle_order(self, event: OrderEvent):
         #converts OrderEvent into FillEvent
         fill = FillEvent(
-            timestamp = datetime.utcnow(),
+            timestamp = event.timestamp,
             symbol = event.symbol,
             direction=event.direction,
             quantity=event.quantity,
