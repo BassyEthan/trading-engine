@@ -5,9 +5,11 @@ from typing import Deque
 from core.logger import get_logger
 from events.base import MarketEvent, SignalEvent
 
+from strategies.base import Strategy
+
 logger = get_logger("STRATEGY")
 
-class RollingMeanReversionStrategy:
+class RollingMeanReversionStrategy(Strategy):
     #rolling mean reversion strategy with absolute threshold.
 
     """
@@ -24,9 +26,9 @@ class RollingMeanReversionStrategy:
             threshold: float = 2.0, 
             symbol: str | None = None
     ):
+        super().__init__(symbol)
         self.window = window
         self.threshold = threshold
-        self.symbol = symbol
 
         self.prices: Deque[float] = deque(maxlen=window)
         self.state = "FLAT" #flat or long
@@ -77,7 +79,7 @@ class RollingMeanReversionStrategy:
 
             return [
                 SignalEvent(
-                    timestamp = datetime.utcnow(),
+                    timestamp = event.timestamp,
                     symbol = event.symbol,
                     direction = "SELL",
                     price = event.price,

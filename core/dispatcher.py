@@ -1,4 +1,5 @@
 from core.logger import get_logger
+from collections import defaultdict
 
 logger = get_logger("DISPATCHER")
 
@@ -19,27 +20,34 @@ class Dispatcher:
 
     def __init__(self):
         #handlers are functions whose job is to react to one specific type of event
-        self._handlers = {}
+        self._handlers = defaultdict(list)
 
     def register_handler(self, event_type, handler):
         #register a handler for a specific event type.
-        if event_type in self._handlers:
-            raise ValueError(f"Handler already registered for {event_type}")
-        self._handlers[event_type] = handler
+        self._handlers[event_type].append(handler)
+        logger.info(
+            f"Registered handler {handler.__qualname__} "
+            f"for event {event_type.__name__}"
+        )
 
     def dispatch(self, event):
         #dispatch an event to its handler
-        handler = self._handlers.get(type(event))
-        logger.info(f"Dispatching {type(event).__name__}")
-        if handler is None:
-            return []
-        
-        result = handler(event)
+        handlers = self._handlers.get(type(event), [])
+        logger.info(
+            f"Dispatching {type(event).__name__} "
+            f"to {len(handlers)} handlers(s)"
+        )
 
-        if result is None:
-            return []
+        new_events = []
+
+        for handler in handlers:
+            result = handler(event)
+            if result:
+                new_events.extend(result)
+
+        return new_events
         
-        return result
+        
     
     #always returns list of events
 
