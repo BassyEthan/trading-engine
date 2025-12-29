@@ -46,8 +46,8 @@ STRATEGY_CONFIG = {
 # ----------------------
 
 PRICE_DATA = {
-    "APPL": [100, 101, 102, 99, 95, 97, 100, 103, 98, 94, 96, 101],
-    "MSFT": [200, 202, 201, 203, 105, 105, 204, 206, 207, 100, 200]
+    "APPL": [100, 101, 102, 100, 100, 97, 100, 103, 98, 94, 96, 101],
+    "MSFT": [200, 202, 1, 10, 105, 105, 1, 206, 207, 100, 200]
 }
 
 def main():
@@ -78,21 +78,24 @@ def main():
 
 
     #register handlers
+    dispatcher.register_handler(MarketEvent, portfolio.handle_market)
     dispatcher.register_handler(SignalEvent, risk.handle_signal)
     dispatcher.register_handler(OrderEvent, execution.handle_order)
     dispatcher.register_handler(FillEvent, portfolio.handle_fill)
 
     market_events = []
 
+    t=0
     for symbol, prices in PRICE_DATA.items():
         for price in prices:
             event = MarketEvent(
-                timestamp = datetime.utcnow(),
+                timestamp = t,
                 symbol = symbol,
                 price = price
             )
             market_events.append(event)
             queue.put(event)
+            t+=1
         
         
 
@@ -104,10 +107,63 @@ def main():
         for e in new_events:
             queue.put(e)
 
+    # Rebuild equity curve aligned with market events
+    # The issue: MarketEvents are processed before FillEvents, so MarketEvent t=14
+    # might compute equity before FillEvent t=13 updates cash. We need to recompute
+    # equity correctly by replaying events in order.
+    
+    # Recompute equity curve by replaying all events in chronological order
+    aligned_equity_curve = []
+    replay_cash = portfolio.initial_cash
+    replay_positions = {}
+    replay_prices = {}
+    
+    # Get all events sorted by timestamp
+    all_events = []
+    for event in market_events:
+        all_events.append(('market', event.timestamp, event.symbol, event.price))
+    for fill in portfolio.trades:
+        all_events.append(('fill', fill.timestamp, fill.symbol, fill.direction, fill.quantity, fill.fill_price))
+    
+    all_events.sort(key=lambda x: (x[1], 0 if x[0] == 'market' else 1))  # market events first at same timestamp
+    
+    event_idx = 0
+    for i, market_event in enumerate(market_events):
+        # Process all events up to this market event's timestamp
+        while event_idx < len(all_events) and all_events[event_idx][1] <= market_event.timestamp:
+            evt = all_events[event_idx]
+            if evt[0] == 'market':
+                _, ts, symbol, price = evt
+                replay_prices[symbol] = price
+            elif evt[0] == 'fill':
+                _, ts, symbol, direction, qty, price = evt
+                replay_prices[symbol] = price
+                if direction == 'BUY':
+                    replay_cash -= qty * price
+                    replay_positions[symbol] = replay_positions.get(symbol, 0) + qty
+                else:  # SELL
+                    replay_cash += qty * price
+                    replay_positions[symbol] = replay_positions.get(symbol, 0) - qty
+                    if replay_positions[symbol] == 0:
+                        del replay_positions[symbol]
+            event_idx += 1
+        
+        # Compute equity at this market event
+        equity = replay_cash
+        for sym, qty in replay_positions.items():
+            if sym in replay_prices:
+                equity += qty * replay_prices[sym]
+        aligned_equity_curve.append(equity)
+    
+    # If no events, use initial cash
+    if not aligned_equity_curve:
+        aligned_equity_curve = [portfolio.initial_cash] * len(market_events)
+    
     #analysis
     analyzer = EquityAnalyzer(
         market_events = market_events,
         fills = portfolio.trades,
+        equity_curve = aligned_equity_curve,
         initial_cash = 10_000
     )
     analyzer.run()

@@ -7,13 +7,14 @@ class EquityAnalyzer:
             self,
             market_events: List[MarketEvent],
             fills: List[FillEvent],
+            equity_curve: List[float],
             initial_cash: float,
     ):
         self.market_events = market_events
         self.fills = sorted(fills, key = lambda f: f.timestamp)
+        self.equity_curve = equity_curve
         self.initial_cash = initial_cash
 
-        self.equity_curve: List[float] = []
         self.drawdown_curve: List[float] = []
         self.max_drawdown: float = 0.0
         self.trade_markers: List[Tuple[int, float, float]] = []
@@ -21,15 +22,16 @@ class EquityAnalyzer:
         self.sharpe: float = 0.0
 
     def run(self):
-        cash = self.initial_cash
-        position_qty = 0
+        # Use equity curve from portfolio (mark-to-market)
+        if not self.equity_curve:
+            return
+
         fill_idx = 0
         peak = self.initial_cash
 
         open_price = None
         entry_idx = None
 
-        equity = []
         returns = []
 
         for i, event in enumerate(self.market_events):
@@ -38,36 +40,35 @@ class EquityAnalyzer:
                 fill = self.fills[fill_idx]
 
                 if fill.direction == "BUY":
-                    cash -= fill.fill_price * fill.quantity
-                    position_qty += fill.quantity
                     open_price = fill.fill_price
                     entry_idx = i
 
                 elif fill.direction == "SELL":
-                    cash += fill.fill_price * fill.quantity
-                    position_qty -= fill.quantity
                     if open_price is not None:
                         pnl = (fill.fill_price - open_price) * fill.quantity
                         self.trade_markers.append((i, fill.fill_price, pnl))
                         open_price = None
                     
-                    if position_qty == 0 and entry_idx is not None:
+                    if entry_idx is not None:
                         self.holding_periods.append((entry_idx, i))
                         entry_idx = None
                 fill_idx += 1
-            
-            equity_value = cash + position_qty * event.price
-            equity.append(equity_value)
 
-            # returns for sharpe
-            if len(equity) > 1:
-                returns.append((equity[-1] - equity[-2])/ equity[-2])
+            # Use equity from portfolio (already mark-to-market)
+            # Equity curve has one entry per market event, aligned by index
+            if i < len(self.equity_curve):
+                equity_value = self.equity_curve[i]
 
-            # drawdown
-            peak = max(peak, equity_value)
-            self.drawdown_curve.append((equity_value - peak) / peak)
+                # returns for sharpe
+                if i > 0 and i - 1 < len(self.equity_curve):
+                    prev_equity = self.equity_curve[i - 1]
+                    if prev_equity > 0:
+                        returns.append((equity_value - prev_equity) / prev_equity)
+
+                # drawdown
+                peak = max(peak, equity_value)
+                self.drawdown_curve.append((equity_value - peak) / peak)
         
-        self.equity_curve = equity
         self.max_drawdown = min(self.drawdown_curve) if self.drawdown_curve else 0.0
         self.sharpe = self._compute_sharpe(returns)
 

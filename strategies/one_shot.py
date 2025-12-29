@@ -23,7 +23,7 @@ class OneShotBuyStrategy(Strategy):
             self.state = "LONG"
         
             signal = SignalEvent(
-                timestamp = datetime.utcnow(),
+                timestamp = event.timestamp,
                 symbol = event.symbol,
                 direction = "BUY",
                 price = event.price
@@ -35,7 +35,7 @@ class OneShotBuyStrategy(Strategy):
             self.state = "DONE"
 
             signal = SignalEvent(
-                timestamp = datetime.utcnow(),
+                timestamp = event.timestamp,
                 symbol = event.symbol,
                 direction = "SELL",
                 price = event.price

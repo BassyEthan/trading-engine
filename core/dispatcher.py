@@ -5,14 +5,13 @@ logger = get_logger("DISPATCHER")
 
 class Dispatcher:
     """
-    Routes events to one registered handler based on event type. 
+    Routes events to registered handlers based on event type. 
 
     It's responsibilities are:
-        maintain event_type to handler mapping
-        dispatch events to the correct handler
-        fail fast if the event has no handler
+        maintain event_type to handler mapping (supports multiple handlers per type)
+        dispatch events to all registered handlers for that event type
+        collect and return new events from handlers
         no business logic
-        each event type has one handler
     
     """
 
