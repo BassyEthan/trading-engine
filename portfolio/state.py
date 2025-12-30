@@ -39,7 +39,7 @@ class PortfolioState:
         direction = event.direction
 
         #update latest price for mark-to-market (use fill price as current market price)
-        self.latest_prices[symbol] = price
+        self.latest_prices[event.symbol] = price
 
         #append fills to trade history
         self.trades.append(event)

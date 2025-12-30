@@ -1,12 +1,15 @@
 from datetime import datetime
+from pathlib import Path
 
-from core.event_queue import EventQueue
+from core.event_queue import PriorityEventQueue
 from core.dispatcher import Dispatcher
 
 from events.base import MarketEvent, SignalEvent, OrderEvent, FillEvent
 from strategies.one_shot import OneShotBuyStrategy
 from strategies.mean_reversion import RollingMeanReversionStrategy
-from risk.engine import PassThroughRiskManager
+from strategies.hold_through_crash import HoldThroughCrashStrategy
+from strategies.multi_signal import MultiSignalStrategy
+from risk.engine import PassThroughRiskManager, RealRiskManager
 from execution.simulator import ExecutionHandler
 from portfolio.state import PortfolioState
 
@@ -36,30 +39,142 @@ STRATEGY_CONFIG = {
         }
     },
     "MSFT": {
+        "class": MultiSignalStrategy,
+        "params": {
+            "signals": [
+                (12, "BUY"),   # Buy at t=12 (before crash)
+                (14, "BUY"),   # Try to buy again at t=14 (during crash, drawdown > 15%)
+                (22, "SELL"),  # Sell at t=22
+            ]
+        }
+    },
+    "GOOGL": {
+        "class": RollingMeanReversionStrategy,
+        "params": {
+            "window": 5,
+            "threshold": 2.0,
+        }
+    },
+    "TSLA": {
         "class": OneShotBuyStrategy,
         "params": {}
+    },
+    "NVDA": {
+        "class": RollingMeanReversionStrategy,
+        "params": {
+            "window": 3,
+            "threshold": 1.5,
+        }
     }
 }
 
 # ----------------------
-# MARKET DATA - fake rn
+# MARKET DATA CONFIGURATION
 # ----------------------
 
-PRICE_DATA = {
+# Option 1: Use fake data for testing 
+USE_FAKE_DATA = False
+FAKE_PRICE_DATA = {
     "APPL": [100, 101, 102, 100, 100, 97, 100, 103, 98, 94, 96, 101],
-    "MSFT": [200, 202, 1, 10, 105, 105, 1, 206, 207, 100, 200]
+    "MSFT": [200, 202, 1, 10, 105, 105, 1, 206, 207, 100, 200],
+    "GOOGL": [150, 152, 148, 151, 149, 153, 150, 155, 152, 154, 151, 153],
+    "TSLA": [300, 305, 295, 302, 298, 310, 308, 315, 312, 320, 318, 325],
+    "NVDA": [400, 405, 395, 402, 398, 410, 408, 415, 412, 420, 418, 425],
 }
+
+# Option 2: Load from CSV files
+# Set USE_FAKE_DATA = False and configure:
+CSV_DATA_DIR = "data/"  # Directory containing CSV files
+CSV_PATTERN = "*.csv"   # File pattern
+
+# Option 3: Load from Yahoo Finance
+# Set USE_FAKE_DATA = False and configure:
+YAHOO_SYMBOLS = ["AAPL", "MSFT", "GOOGL", "TSLA", "NVDA"]
+YAHOO_START_DATE = "2024-01-01"
+YAHOO_END_DATE = "2024-12-31"
+
+# Load market data based on configuration
+def load_price_data():
+    """Load market data from configured source."""
+    if USE_FAKE_DATA:
+        return FAKE_PRICE_DATA
+    
+    from data.loader import load_market_data
+    
+    data = {}
+    errors = []
+    
+    # Try CSV directory first
+    if Path(CSV_DATA_DIR).exists():
+        try:
+            csv_data = load_market_data(
+                "csv_dir",
+                directory=CSV_DATA_DIR,
+                pattern=CSV_PATTERN,
+            )
+            if csv_data:
+                print(f"✓ Loaded {len(csv_data)} symbols from CSV: {list(csv_data.keys())}")
+                return csv_data
+            else:
+                errors.append(f"CSV directory '{CSV_DATA_DIR}' exists but contains no valid data files")
+        except Exception as e:
+            errors.append(f"CSV loading failed: {e}")
+    else:
+        errors.append(f"CSV directory '{CSV_DATA_DIR}' does not exist")
+    
+    # Try Yahoo Finance
+    try:
+        yahoo_data = load_market_data(
+            "yahoo",
+            symbols=YAHOO_SYMBOLS,
+            start_date=YAHOO_START_DATE,
+            end_date=YAHOO_END_DATE,
+        )
+        if yahoo_data:
+            print(f"✓ Loaded {len(yahoo_data)} symbols from Yahoo Finance: {list(yahoo_data.keys())}")
+            return yahoo_data
+        else:
+            errors.append("Yahoo Finance returned no data")
+    except Exception as e:
+        errors.append(f"Yahoo Finance loading failed: {e}")
+    
+    # No data found - raise error
+    error_msg = "Failed to load market data:\n"
+    if errors:
+        error_msg += "\n".join(f"  - {err}" for err in errors)
+    error_msg += f"\n\nCSV directory checked: {CSV_DATA_DIR} (exists: {Path(CSV_DATA_DIR).exists()})"
+    error_msg += f"\nYahoo Finance symbols: {YAHOO_SYMBOLS}"
+    error_msg += "\n\nTo use fake data for testing, set USE_FAKE_DATA = True in main.py"
+    raise RuntimeError(error_msg)
+
+PRICE_DATA = load_price_data()
 
 def main():
     
     #core infrastructure
-    queue = EventQueue()
+    # Use PriorityEventQueue for timestamp-ordered processing
+    # This ensures all events at timestamp T are fully processed before T+1
+    queue = PriorityEventQueue()
     dispatcher = Dispatcher()
 
     #components
-    risk = PassThroughRiskManager(fixed_quantity=10)
-    execution = ExecutionHandler()
     portfolio = PortfolioState(initial_cash=10000)
+    
+    # Use RealRiskManager with limits
+    risk = RealRiskManager(
+        portfolio=portfolio,
+        fixed_quantity=10,
+        max_drawdown=0.15,  # 15% max drawdown
+        max_position_pct=0.30,  # Max 30% of equity in single position
+        max_total_exposure_pct=1.0,  # Max 100% of equity in total positions
+        max_positions=None,  # No limit on number of positions
+    )
+    
+    execution = ExecutionHandler()
+
+    # IMPORTANT: Register portfolio handler FIRST so prices are updated before strategies generate signals
+    # This ensures risk manager sees the latest mark-to-market equity when checking drawdown
+    dispatcher.register_handler(MarketEvent, portfolio.handle_market)
 
     #register strategies
     strategies = []
@@ -77,8 +192,7 @@ def main():
         )
 
 
-    #register handlers
-    dispatcher.register_handler(MarketEvent, portfolio.handle_market)
+    #register other handlers
     dispatcher.register_handler(SignalEvent, risk.handle_signal)
     dispatcher.register_handler(OrderEvent, execution.handle_order)
     dispatcher.register_handler(FillEvent, portfolio.handle_fill)
@@ -178,23 +292,58 @@ def main():
             f"{trade.symbol} @ {trade.fill_price}"
         )
 
-    #final portfolio state
+    # Calculate final equity (cash + open positions)
+    final_equity = portfolio.cash
+    for symbol, position in portfolio.positions.items():
+        if symbol in portfolio.latest_prices:
+            final_equity += position.quantity * portfolio.latest_prices[symbol]
+    
+    # Final portfolio state (current holdings only)
     print("\n--- FINAL PORTFOLIO STATE ---")
-    print("Cash:", portfolio.cash)
-    print("Positions:", portfolio.positions)
-    print("Realized PnL:", portfolio.realized_pnl)
-    print(f"Max Drawdown: {analyzer.max_drawdown:.2%}")
-    print(f"Sharpe Ratio: {analyzer.sharpe:.2f}")
-
-
-
-    #metrics
+    print(f"Cash: ${portfolio.cash:,.2f}")
+    if portfolio.positions:
+        print("Open Positions:")
+        for symbol, position in portfolio.positions.items():
+            current_price = portfolio.latest_prices.get(symbol, 0)
+            position_value = position.quantity * current_price
+            unrealized_pnl = position_value - (position.quantity * position.avg_cost)
+            print(f"  {symbol}: {position.quantity} shares @ ${position.avg_cost:.2f} avg")
+            print(f"    Current price: ${current_price:.2f}")
+            print(f"    Position value: ${position_value:,.2f}")
+            print(f"    Unrealized PnL: ${unrealized_pnl:,.2f}")
+    else:
+        print("Open Positions: None")
+    print(f"Final Equity: ${final_equity:,.2f}")
+    
+    # Performance metrics (all stats consolidated here)
     metrics = TradeMetrics(
         fills = portfolio.trades,
         initial_cash = 10_000,
         final_cash = portfolio.cash,
+        final_equity = final_equity,
     )
     metrics.summary()
+    
+    # Risk metrics
+    print("\n--- RISK METRICS ---")
+    print(f"Max Drawdown: {analyzer.max_drawdown:.2%}")
+    print(f"Sharpe Ratio: {analyzer.sharpe:.2f}")
+    
+    # Risk rejection summary
+    if hasattr(risk, 'get_rejection_summary'):
+        rejection_summary = risk.get_rejection_summary()
+        if rejection_summary["total"] > 0:
+            print("\n--- RISK REJECTIONS ---")
+            print(f"Total rejected trades: {rejection_summary['total']}")
+            print("Rejections by check:")
+            for check, count in rejection_summary["by_check"].items():
+                print(f"  {check}: {count}")
+            print("Rejections by reason:")
+            for reason, count in list(rejection_summary["by_reason"].items())[:5]:  # Show first 5
+                print(f"  {reason}: {count}")
+        else:
+            print("\n--- RISK REJECTIONS ---")
+            print("No trades rejected")
 
     #plot
     plot_equity(analyzer, show_price = False)

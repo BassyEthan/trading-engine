@@ -1,6 +1,10 @@
 """
 Test script to manually verify equity curve calculations
 """
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from core.event_queue import EventQueue
 from core.dispatcher import Dispatcher
 from events.base import MarketEvent, SignalEvent, OrderEvent, FillEvent

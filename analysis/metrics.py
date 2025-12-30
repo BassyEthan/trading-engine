@@ -10,10 +10,12 @@ class TradeMetrics:
             fills: List[FillEvent],
             initial_cash: float,
             final_cash: float,
+            final_equity: float = None,  # Optional: if provided, use for total_pnl
     ):
         self.fills = fills
         self.initial_cash = initial_cash
         self.final_cash = final_cash
+        self.final_equity = final_equity  # If None, will use final_cash (backward compat)
 
         self.trade_pnls = self._compute_trade_pnls()
 
@@ -40,7 +42,16 @@ class TradeMetrics:
         return trade_pnls
     
     def total_pnl(self) -> float:
-        return self.final_cash - self.initial_cash
+        """
+        Calculate total PnL (realized + unrealized).
+        
+        If final_equity is provided, uses equity (includes open positions).
+        Otherwise, uses final_cash (only realized PnL from closed trades).
+        """
+        if self.final_equity is not None:
+            return self.final_equity - self.initial_cash
+        else:
+            return self.final_cash - self.initial_cash
     
     def num_trades(self) -> int:
         return len(self.trade_pnls)
@@ -58,8 +69,18 @@ class TradeMetrics:
     
     def summary(self) -> None:
         print("\n--- PERFORMANCE METRICS ---")
-        print(f"Total PnL: {self.total_pnl():.2f}")
-        print(f"Number of trades: {self.num_trades()}")
-        print(f"Win rate: {self.win_rate() * 100:.1f}%")
-        print(f"Average PnL per trade: {self.avg_pnl_per_trade():.2f}")
-        print(f"Trade PnLs: {self.trade_pnls}")
+        print(f"Initial Capital: ${self.initial_cash:,.2f}")
+        if self.final_equity is not None:
+            print(f"Final Equity: ${self.final_equity:,.2f}")
+            print(f"Total Return: ${self.total_pnl():,.2f} ({self.total_pnl() / self.initial_cash * 100:.2f}%)")
+            print(f"  Realized PnL: ${self.final_cash - self.initial_cash:,.2f}")
+            print(f"  Unrealized PnL: ${self.final_equity - self.final_cash:,.2f}")
+        else:
+            print(f"Final Cash: ${self.final_cash:,.2f}")
+            print(f"Total PnL (realized only): ${self.total_pnl():,.2f}")
+        print(f"\nTrading Statistics:")
+        print(f"  Number of trades: {self.num_trades()}")
+        print(f"  Win rate: {self.win_rate() * 100:.1f}%")
+        print(f"  Average PnL per trade: ${self.avg_pnl_per_trade():.2f}")
+        if self.trade_pnls:
+            print(f"  Trade PnLs: {[f'${pnl:.2f}' for pnl in self.trade_pnls]}")
