@@ -18,7 +18,7 @@ from core.event_queue import PriorityEventQueue
 from core.dispatcher import Dispatcher
 from portfolio.state import PortfolioState
 from risk.engine import RealRiskManager
-from execution.simulator import ExecutionHandler
+from execution.simulator import ExecutionHandler, RealisticExecutionHandler
 from events.base import MarketEvent, SignalEvent, OrderEvent, FillEvent
 from strategies.mean_reversion import RollingMeanReversionStrategy
 from strategies.one_shot import OneShotBuyStrategy
@@ -45,7 +45,13 @@ def run_simulation():
         max_total_exposure_pct=1.0,
         max_positions=None,
     )
-    execution = ExecutionHandler()
+    # Use realistic execution handler with slippage and spread costs
+    execution = RealisticExecutionHandler(
+        spread_pct=0.001,  # 0.1% bid-ask spread
+        base_slippage_pct=0.0005,  # 0.05% base slippage
+        impact_factor=0.000001,  # 0.0001% per share market impact
+        slippage_volatility=0.0002,  # 0.02% random variation
+    )
     
     # Register portfolio handler first
     dispatcher.register_handler(MarketEvent, portfolio.handle_market)
@@ -152,6 +158,16 @@ def run_simulation():
     if hasattr(risk, 'get_rejection_summary'):
         rejection_summary = risk.get_rejection_summary()
     
+    # Get execution costs if available
+    execution_costs = None
+    if hasattr(execution, 'total_execution_cost'):
+        execution_costs = {
+            'total_spread_cost': execution.total_spread_cost,
+            'total_slippage_cost': execution.total_slippage_cost,
+            'total_execution_cost': execution.total_execution_cost,
+            'num_fills': len(portfolio.trades),
+        }
+    
     return {
         'portfolio': portfolio,
         'analyzer': analyzer,
@@ -161,6 +177,7 @@ def run_simulation():
         'market_events': market_events,
         'equity_curve': aligned_equity_curve,
         'final_equity': final_equity,
+        'execution_costs': execution_costs,
     }
 
 def plot_equity_curve(equity_curve, market_events):
@@ -198,9 +215,111 @@ def plot_equity_curve(equity_curve, market_events):
     return fig
 
 # Streamlit app
-st.set_page_config(page_title="Trading Engine Dashboard", layout="wide")
+st.set_page_config(
+    page_title="Trading Engine Dashboard", 
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
-st.title("📈 Trading Engine Dashboard")
+# Custom CSS for professional styling
+st.markdown("""
+<style>
+    /* Reset Streamlit defaults that interfere */
+    h1, h2, h3, h4, h5, h6 {
+        color: #1a1a1a !important;
+        background: transparent !important;
+    }
+    
+    .main-header {
+        font-size: 2rem;
+        font-weight: 600;
+        color: #ffffff !important;
+        margin-bottom: 1rem;
+        letter-spacing: -0.5px;
+        background: transparent !important;
+    }
+    
+    .section-header {
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: #ffffff !important;
+        margin-top: 1.5rem;
+        margin-bottom: 1rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 1px solid #e0e0e0;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        background: transparent !important;
+    }
+    
+    .subsection-header {
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: #ffffff !important;
+        margin-top: 1.25rem;
+        margin-bottom: 0.75rem;
+        background: transparent !important;
+    }
+    
+    .metric-value {
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: #1a1a1a;
+        margin: 0.25rem 0;
+    }
+    
+    .metric-label {
+        font-size: 0.75rem;
+        color: #ffffff;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 0.25rem;
+    }
+    
+    .position-card {
+        background: #ffffff;
+        padding: 1rem;
+        border-radius: 4px;
+        border: 1px solid #e0e0e0;
+        margin-bottom: 0.75rem;
+        transition: box-shadow 0.2s;
+    }
+    
+    .position-card:hover {
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .profit {
+        color: #16a34a;
+        font-weight: 500;
+    }
+    
+    .loss {
+        color: #dc2626;
+        font-weight: 500;
+    }
+    
+    .neutral {
+        color: #666;
+        font-weight: 500;
+    }
+    
+    .stat-box {
+        background: #fafafa;
+        padding: 1rem;
+        border-radius: 4px;
+        border: 1px solid #e0e0e0;
+        margin-bottom: 0.75rem;
+    }
+    
+    /* Ensure proper spacing between sections */
+    .section-spacer {
+        margin-top: 2rem;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown('<h1 class="main-header">Trading Engine Dashboard</h1>', unsafe_allow_html=True)
 st.markdown("---")
 
 # Run simulation
@@ -212,92 +331,260 @@ analyzer = results['analyzer']
 metrics = results['metrics']
 risk = results['risk']
 rejection_summary = results['rejection_summary']
+execution_costs = results.get('execution_costs')
 equity_curve = results['equity_curve']
 market_events = results['market_events']
 final_equity = results['final_equity']
 
-# Main metrics row
+# Main metrics row - Top KPIs
+total_return = metrics.total_pnl()
+return_pct = (total_return / 10000) * 100
+
 col1, col2, col3, col4 = st.columns(4)
 with col1:
-    st.metric("Final Equity", f"${final_equity:,.2f}")
+    st.markdown('<div class="metric-label">Final Equity</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="metric-value">${final_equity:,.2f}</div>', unsafe_allow_html=True)
 with col2:
-    total_return = metrics.total_pnl()
-    return_pct = (total_return / 10000) * 100
-    st.metric("Total Return", f"${total_return:,.2f}", f"{return_pct:+.2f}%")
+    st.markdown('<div class="metric-label">Total Return</div>', unsafe_allow_html=True)
+    color_class = "profit" if return_pct >= 0 else "loss"
+    st.markdown(f'<div class="metric-value {color_class}">${total_return:,.2f}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="{color_class}" style="font-size: 0.9rem; margin-top: 0.25rem;">{return_pct:+.2f}%</div>', unsafe_allow_html=True)
 with col3:
-    st.metric("Max Drawdown", f"{analyzer.max_drawdown:.2%}")
+    st.markdown('<div class="metric-label">Max Drawdown</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="metric-value loss">{analyzer.max_drawdown:.2%}</div>', unsafe_allow_html=True)
 with col4:
-    st.metric("Sharpe Ratio", f"{analyzer.sharpe:.2f}")
+    st.markdown('<div class="metric-label">Sharpe Ratio</div>', unsafe_allow_html=True)
+    sharpe_class = "profit" if analyzer.sharpe > 1 else "neutral" if analyzer.sharpe > 0 else "loss"
+    st.markdown(f'<div class="metric-value {sharpe_class}">{analyzer.sharpe:.2f}</div>', unsafe_allow_html=True)
 
-st.markdown("---")
+st.markdown("<br>", unsafe_allow_html=True)
 
 # Equity curve plot
-st.subheader("📊 Equity Curve & Drawdown")
+st.markdown('<div class="section-header">Equity Curve & Drawdown</div>', unsafe_allow_html=True)
 fig = plot_equity_curve(equity_curve, market_events)
 st.pyplot(fig)
 plt.close(fig)
+st.markdown("<br>", unsafe_allow_html=True)
 
 # Two column layout
 col1, col2 = st.columns(2)
 
 with col1:
-    st.subheader("💼 Portfolio State")
-    st.write(f"**Cash:** ${portfolio.cash:,.2f}")
+    st.markdown('<div class="section-header">Portfolio State</div>', unsafe_allow_html=True)
     
+    # Cash
+    st.markdown(f"""
+    <div class="stat-box">
+        <div class="metric-label">Cash</div>
+        <div class="metric-value">${portfolio.cash:,.2f}</div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown('<div class="subsection-header">Open Positions</div>', unsafe_allow_html=True)
     if portfolio.positions:
-        st.write("**Open Positions:**")
         for symbol, position in portfolio.positions.items():
             current_price = portfolio.latest_prices.get(symbol, 0)
             position_value = position.quantity * current_price
             unrealized_pnl = position_value - (position.quantity * position.avg_cost)
-            st.write(f"""
-            **{symbol}**
-            - Shares: {position.quantity} @ ${position.avg_cost:.2f} avg
-            - Current: ${current_price:.2f}
-            - Value: ${position_value:,.2f}
-            - Unrealized PnL: ${unrealized_pnl:,.2f}
-            """)
+            pnl_class = "profit" if unrealized_pnl >= 0 else "loss"
+            
+            st.markdown(f"""
+            <div class="position-card">
+                <div style="font-weight: 600; font-size: 1rem; color: #1a1a1a; margin-bottom: 0.75rem;">{symbol}</div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 0.75rem;">
+                    <div>
+                        <div style="font-size: 0.75rem; color: #666; margin-bottom: 0.25rem;">SHARES</div>
+                        <div style="font-weight: 500; color: #1a1a1a;">{position.quantity}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 0.75rem; color: #666; margin-bottom: 0.25rem;">AVG COST</div>
+                        <div style="font-weight: 500; color: #1a1a1a;">${position.avg_cost:.2f}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 0.75rem; color: #666; margin-bottom: 0.25rem;">CURRENT</div>
+                        <div style="font-weight: 500; color: #1a1a1a;">${current_price:.2f}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 0.75rem; color: #666; margin-bottom: 0.25rem;">VALUE</div>
+                        <div style="font-weight: 500; color: #1a1a1a;">${position_value:,.2f}</div>
+                    </div>
+                </div>
+                <div style="padding-top: 0.75rem; border-top: 1px solid #e0e0e0; display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-size: 0.75rem; color: #666; text-transform: uppercase;">Unrealized PnL</span>
+                    <span class="{pnl_class}" style="font-weight: 600; font-size: 1rem;">${unrealized_pnl:,.2f}</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
     else:
-        st.write("**Open Positions:** None")
+        st.markdown("""
+        <div class="stat-box" style="text-align: center; color: #666; padding: 2rem;">
+            No open positions
+        </div>
+        """, unsafe_allow_html=True)
     
-    st.write(f"**Final Equity:** ${final_equity:,.2f}")
+    st.markdown('<div class="subsection-header" style="margin-top: 1.5rem;">Final Equity</div>', unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="stat-box">
+        <div class="metric-value">${final_equity:,.2f}</div>
+    </div>
+    """, unsafe_allow_html=True)
 
 with col2:
-    st.subheader("📊 Performance Metrics")
-    st.write(f"**Initial Capital:** ${metrics.initial_cash:,.2f}")
-    st.write(f"**Final Equity:** ${final_equity:,.2f}")
-    st.write(f"**Total Return:** ${total_return:,.2f} ({return_pct:+.2f}%)")
+    st.markdown('<div class="section-header">Performance Metrics</div>', unsafe_allow_html=True)
     
+    # Capital metrics
+    st.markdown('<div class="subsection-header">Capital</div>', unsafe_allow_html=True)
+    col_cap1, col_cap2 = st.columns(2)
+    with col_cap1:
+        st.markdown(f"""
+        <div class="stat-box">
+            <div class="metric-label">Initial Capital</div>
+            <div class="metric-value">${metrics.initial_cash:,.2f}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with col_cap2:
+        st.markdown(f"""
+        <div class="stat-box">
+            <div class="metric-label">Final Equity</div>
+            <div class="metric-value">${final_equity:,.2f} </div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Returns
+    st.markdown('<div class="subsection-header" style="margin-top: 1rem;">Returns</div>', unsafe_allow_html=True)
     realized_pnl = portfolio.cash - metrics.initial_cash
     unrealized_pnl = final_equity - portfolio.cash
-    st.write(f"**Realized PnL:** ${realized_pnl:,.2f}")
-    st.write(f"**Unrealized PnL:** ${unrealized_pnl:,.2f}")
+    return_class = "profit" if return_pct >= 0 else "loss"
+    realized_class = "profit" if realized_pnl >= 0 else "loss"
+    unrealized_class = "profit" if unrealized_pnl >= 0 else "loss"
     
-    st.write("**Trading Statistics:**")
-    st.write(f"- Number of trades: {metrics.num_trades()}")
-    st.write(f"- Win rate: {metrics.win_rate() * 100:.1f}%")
-    st.write(f"- Avg PnL per trade: ${metrics.avg_pnl_per_trade():.2f}")
+    st.markdown(f"""
+    <div class="stat-box">
+        <div class="metric-label">Total Return</div>
+        <div class="metric-value {return_class}">${total_return:,.2f}</div>
+        <div class="{return_class}" style="font-size: 0.9rem; margin-top: 0.25rem;">{return_pct:+.2f}%</div>
+    </div>
+    <div class="stat-box">
+        <div class="metric-label">Realized PnL</div>
+        <div class="metric-value {realized_class}">${realized_pnl:,.2f}</div>
+    </div>
+    <div class="stat-box">
+        <div class="metric-label">Unrealized PnL</div>
+        <div class="metric-value {unrealized_class}">${unrealized_pnl:,.2f}</div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Trading statistics
+    st.markdown('<div class="subsection-header" style="margin-top: 1rem;">Trading Statistics</div>', unsafe_allow_html=True)
+    col_stat1, col_stat2 = st.columns(2)
+    with col_stat1:
+        st.markdown(f"""
+        <div class="stat-box">
+            <div class="metric-label">Trades</div>
+            <div class="metric-value">{metrics.num_trades()}</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.markdown(f"""
+        <div class="stat-box">
+            <div class="metric-label">Win Rate</div>
+            <div class="metric-value">{metrics.win_rate() * 100:.1f}%</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with col_stat2:
+        st.markdown(f"""
+        <div class="stat-box">
+            <div class="metric-label">Avg PnL/Trade</div>
+            <div class="metric-value">${metrics.avg_pnl_per_trade():.2f}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Execution costs
+    if execution_costs:
+        st.markdown('<div class="subsection-header" style="margin-top: 1rem;">Execution Costs</div>', unsafe_allow_html=True)
+        st.markdown(f"""
+        <div class="stat-box">
+            <div class="metric-label">Breakdown</div>
+            <div style="margin-top: 0.75rem;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem; font-size: 0.9rem;">
+                    <span style="color: #666;">Spread</span>
+                    <span style="color: #1a1a1a; font-weight: 500;">${execution_costs['total_spread_cost']:,.2f}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem; font-size: 0.9rem;">
+                    <span style="color: #666;">Slippage</span>
+                    <span style="color: #1a1a1a; font-weight: 500;">${execution_costs['total_slippage_cost']:,.2f}</span>
+                </div>
+                <div style="padding-top: 0.75rem; border-top: 1px solid #e0e0e0; margin-top: 0.5rem; display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-weight: 600; color: #1a1a1a;">Total</span>
+                    <span style="font-weight: 600; font-size: 1.1rem; color: #1a1a1a;">${execution_costs['total_execution_cost']:,.2f}</span>
+                </div>
+                """, unsafe_allow_html=True)
+        if execution_costs['num_fills'] > 0:
+            avg_cost = execution_costs['total_execution_cost'] / execution_costs['num_fills']
+            st.markdown(f"""
+            <div style="margin-top: 0.5rem; font-size: 0.85rem; color: #666;">
+                Avg per trade: <span style="font-weight: 500; color: #1a1a1a;">${avg_cost:.2f}</span>
+            </div>
+            """, unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
 st.markdown("---")
 
+st.markdown("<div class='section-spacer'></div>", unsafe_allow_html=True)
+
 # Risk metrics and rejections
+st.markdown("---")
 col1, col2 = st.columns(2)
 
 with col1:
-    st.subheader("⚠️ Risk Metrics")
-    st.write(f"**Max Drawdown:** {analyzer.max_drawdown:.2%}")
-    st.write(f"**Sharpe Ratio:** {analyzer.sharpe:.2f}")
+    st.markdown('<div class="section-header">Risk Metrics</div>', unsafe_allow_html=True)
+    col_risk1, col_risk2 = st.columns(2)
+    with col_risk1:
+        st.markdown(f"""
+        <div class="stat-box">
+            <div class="metric-label">Max Drawdown</div>
+            <div class="metric-value loss">{analyzer.max_drawdown:.2%}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with col_risk2:
+        sharpe_class = "profit" if analyzer.sharpe > 1 else "neutral" if analyzer.sharpe > 0 else "loss"
+        st.markdown(f"""
+        <div class="stat-box">
+            <div class="metric-label">Sharpe Ratio</div>
+            <div class="metric-value {sharpe_class}">{analyzer.sharpe:.2f}</div>
+        </div>
+        """, unsafe_allow_html=True)
 
 with col2:
-    st.subheader("🚫 Risk Rejections")
+    st.markdown('<div class="section-header">Risk Rejections</div>', unsafe_allow_html=True)
     if rejection_summary and rejection_summary["total"] > 0:
-        st.write(f"**Total rejected trades:** {rejection_summary['total']}")
-        st.write("**Rejections by check:**")
+        st.markdown(f"""
+        <div class="stat-box">
+            <div class="metric-label">Total Rejected</div>
+            <div class="metric-value loss">{rejection_summary['total']}</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.markdown('<div style="margin-top: 1rem; font-size: 0.75rem; color: #666; text-transform: uppercase; margin-bottom: 0.5rem;">Breakdown by Check</div>', unsafe_allow_html=True)
         for check, count in rejection_summary["by_check"].items():
-            st.write(f"- {check}: {count}")
+            st.markdown(f"""
+            <div class="stat-box" style="padding: 0.75rem; margin-bottom: 0.5rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-size: 0.9rem; color: #1a1a1a;">{check}</span>
+                    <span style="font-weight: 600; color: #dc2626;">{count}</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
     else:
-        st.write("No trades rejected")
+        st.markdown("""
+        <div class="stat-box" style="text-align: center; padding: 2rem; color: #666;">
+            No trades rejected
+        </div>
+        """, unsafe_allow_html=True)
 
+st.markdown("<br>", unsafe_allow_html=True)
 st.markdown("---")
-st.caption("Trading Engine Dashboard - Run simulation to see results")
+st.markdown("""
+<div style='text-align: center; color: #999; padding: 1rem; font-size: 0.85rem;'>
+    Trading Engine Dashboard - Results from latest simulation run
+</div>
+""", unsafe_allow_html=True)
 

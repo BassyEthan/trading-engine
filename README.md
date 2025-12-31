@@ -14,24 +14,59 @@ This project emphasizes:
 
 ## Features
 
-- ✅ Event-driven architecture
-- ✅ Pluggable strategies
-- ✅ Mark-to-market equity tracking
-- ✅ Portfolio state management
-- ✅ Risk management framework (currently PassThrough)
-- ✅ Execution simulation
-- ✅ Performance analytics
+- ✅ **Event-driven architecture** with timestamp-ordered processing
+- ✅ **Pluggable strategies** (mean reversion, momentum, custom)
+- ✅ **Mark-to-market equity tracking** (updates on every market event)
+- ✅ **Portfolio state management** (single source of truth)
+- ✅ **Real risk management** (drawdown limits, position size, exposure)
+- ✅ **Realistic execution** (slippage, bid-ask spread, market impact)
+- ✅ **Real market data** (CSV files, Yahoo Finance API)
+- ✅ **Performance analytics** (equity curve, drawdown, Sharpe ratio)
+- ✅ **Web dashboard** (Streamlit UI for visualization)
+- ✅ **Multi-symbol support** (trade multiple assets simultaneously)
 
 ## Quick Start
 
+### Basic Usage
+
 ```bash
-# Run the main simulation
+# Install dependencies
+pip install -r requirements.txt
+
+# Run simulation with real data (Yahoo Finance)
 python3 main.py
 
-# Run tests
-python3 -m pytest tests/  # If using pytest
-# Or run individual tests:
+# Or use CSV files (see data/QUICKSTART.md)
+# Place CSV files in data/ directory, then run:
+python3 main.py
+
+# Run web dashboard
+streamlit run ui_dashboard.py
+```
+
+### Data Configuration
+
+Edit `main.py` to configure data source:
+
+```python
+# Use fake data for testing
+USE_FAKE_DATA = True
+
+# Or use real data
+USE_FAKE_DATA = False
+CSV_DATA_DIR = "data/"  # CSV files
+# OR
+YAHOO_SYMBOLS = ["AAPL", "MSFT", "GOOGL"]
+YAHOO_START_DATE = "2024-01-01"
+YAHOO_END_DATE = "2024-12-31"
+```
+
+### Testing
+
+```bash
+# Run individual tests
 python3 tests/test_equity.py
+python3 tests/test_risk_rejection.py
 python3 tests/test_hold_strategy.py
 ```
 
@@ -39,37 +74,48 @@ python3 tests/test_hold_strategy.py
 
 ```
 trading-engine/
-├── main.py                 # Entry point
+├── main.py                 # Entry point and configuration
+├── ui_dashboard.py         # Streamlit web dashboard
 ├── core/                   # Core infrastructure
-│   ├── event_queue.py     # FIFO event queue
-│   ├── dispatcher.py       # Event routing
+│   ├── event_queue.py     # Priority queue (timestamp-ordered)
+│   ├── dispatcher.py      # Event routing (multi-handler support)
 │   └── logger.py          # Logging utilities
 ├── events/                 # Event definitions
 │   └── base.py            # MarketEvent, SignalEvent, OrderEvent, FillEvent
 ├── strategies/             # Trading strategies
 │   ├── base.py            # Strategy base class
-│   ├── mean_reversion.py  # Mean reversion strategy
-│   ├── one_shot.py        # Simple test strategy
-│   └── hold_through_crash.py  # Stress test strategy
+│   ├── mean_reversion.py  # Rolling mean reversion strategy
+│   ├── one_shot.py        # Simple buy-and-hold strategy
+│   ├── hold_through_crash.py  # Stress test strategy
+│   └── multi_signal.py    # Multi-signal test strategy
 ├── risk/                   # Risk management
-│   └── engine.py          # Risk manager (currently PassThrough)
+│   └── engine.py          # RealRiskManager (enforces limits)
 ├── execution/              # Order execution
-│   └── simulator.py       # Execution handler
+│   └── simulator.py       # RealisticExecutionHandler (slippage, spread)
 ├── portfolio/              # Portfolio state
 │   └── state.py           # Single source of truth for portfolio
+├── data/                   # Market data loading
+│   ├── loader.py          # CSV, Yahoo Finance data loader
+│   └── example_data.py    # Sample data formats
 ├── analysis/               # Performance analysis
 │   ├── equity_analyzer.py # Equity curve analysis
 │   ├── equity_plotter.py  # Visualization
-│   └── metrics.py         # Performance metrics
+│   └── metrics.py          # Performance metrics (realized/unrealized PnL)
 ├── tests/                  # Test suite
 │   ├── test_equity.py     # Equity calculation verification
 │   ├── test_hold_strategy.py  # Strategy demonstration
+│   ├── test_risk_manager.py   # Risk manager tests
+│   ├── test_risk_rejection.py # Risk rejection verification
 │   ├── stress_test.py     # Stress testing
 │   └── debug_equity.py    # Debugging tools
 └── docs/                   # Documentation
     ├── DESIGN.md          # System design and goals
     ├── ROADMAP.md         # Long-term roadmap
-    └── STRATEGY_EXAMPLES.md  # Strategy usage examples
+    ├── STRATEGY_EXAMPLES.md  # Strategy usage examples
+    ├── RISK_MANAGER_GUIDE.md # Risk manager documentation
+    ├── DRAWDOWN_EXPLANATION.md # Drawdown behavior explained
+    ├── EVENT_ORDERING.md  # Timestamp-ordered processing
+    └── EXECUTION_REALISM.md # Execution costs explained
 ```
 
 ## Configuration
@@ -107,20 +153,38 @@ STRATEGY_CONFIG = {
 MarketEvent → Strategy → SignalEvent → Risk → OrderEvent → Execution → FillEvent → Portfolio
 ```
 
-## Current Limitations
+## Current Status
 
-- Risk manager is PassThrough (accepts all trades)
-- Execution has no latency or slippage
-- Historical data only (hardcoded)
-- Simple strategies for testing
+### ✅ Implemented
+- **Real Risk Manager** - Enforces drawdown, position size, and exposure limits
+- **Realistic Execution** - Slippage, bid-ask spread, market impact
+- **Real Market Data** - CSV files and Yahoo Finance API support
+- **Timestamp-Ordered Processing** - Deterministic event processing
+- **Mark-to-Market Equity** - Real-time portfolio valuation
+- **Multi-Symbol Support** - Trade multiple assets simultaneously
+- **Web Dashboard** - Streamlit UI for visualization
+- **Comprehensive Metrics** - Realized/unrealized PnL, drawdown, Sharpe ratio
 
-See `docs/ROADMAP.md` for planned improvements.
+### 🚧 Future Enhancements
+- Order types (limit, stop-loss, take-profit)
+- Latency simulation
+- Partial fills
+- Multi-timeframe data
+- Live trading interface
+
+See `docs/ROADMAP.md` for detailed roadmap.
 
 ## Documentation
 
 - `docs/DESIGN.md` - System design and philosophy
 - `docs/ROADMAP.md` - Long-term development roadmap
 - `docs/STRATEGY_EXAMPLES.md` - Strategy usage examples
+- `docs/RISK_MANAGER_GUIDE.md` - Risk manager configuration and usage
+- `docs/DRAWDOWN_EXPLANATION.md` - Understanding drawdown behavior
+- `docs/EVENT_ORDERING.md` - Timestamp-ordered event processing
+- `docs/EXECUTION_REALISM.md` - Execution costs and slippage
+- `data/README.md` - Market data loading guide
+- `UI_README.md` - Web dashboard usage
 
 ## Testing
 

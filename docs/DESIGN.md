@@ -1,16 +1,17 @@
 SYSTEM GOAL:
 
-The system is a model agnostic, which means it doesn't care what is being traded, event-trading (e.g. new price tick, new order book udpate, risk limit overruled) system that will simulate how actual trading decks work. It takes market data as time-ordered events (live input). Additionally, it generates trading signals via pluggable strategies - this means that the strategy isn't hard-coded in the engine. And, before a trade happens, the system asks if we exceeded max position size, violated leverage limits, or increase drawdown beyond tolerance. If any, the trade will be rejected. The model will also simulate realistic execution with latency and slippage. There is also a single source of truth for portfolio state, meaning that there is only one place that tracks cash, positions, realized PnL and unrealized PnL, and exposure. After, each trade will be logged - but also why a signal was generated, why a trade was allowed or blocked, or what risk rule triggered. 
+The system is a model-agnostic, event-driven trading engine that simulates how actual trading systems work. It processes market data as time-ordered events and generates trading signals via pluggable strategies. Before a trade executes, the system enforces risk limits (drawdown, position size, exposure). The system simulates realistic execution with slippage, bid-ask spread, and market impact. Portfolio state is the single source of truth, tracking cash, positions, realized PnL, and unrealized PnL. All trades are logged with full audit trail including why signals were generated, why trades were allowed or blocked, and what risk rules triggered.
 
-The focus of this model isn't to predict prices, find alpha, or beat the market, because models are very fragile, markets are non-stationary, and past performance lies, but rather because we want to focus on handling uncertainity, robust behavior when assumptions break. 
+The focus of this model isn't to predict prices, find alpha, or beat the market, because models are very fragile, markets are non-stationary, and past performance lies. Rather, we focus on handling uncertainty, robust behavior when assumptions break, and realistic execution simulation.
 
-This project will teach me how a mediocre strategy and excellent execution can survive. On the other hand, a great strategy but poor execution will fail. 
-It will also teach me:
-    Systems thinking
-    Async architecture understanding
-    State management under uncertainity
-    Real-world trading realism
-    Engineering discipline over hype
+This project demonstrates how a mediocre strategy with excellent execution can survive, while a great strategy with poor execution will fail.
+
+**Key Learnings:**
+- Systems thinking
+- Event-driven architecture
+- State management under uncertainty
+- Real-world trading realism
+- Engineering discipline over hype
 
 
 Important definitions:
@@ -31,12 +32,23 @@ Market: historical replay (no live feeds yet)
 Execution: paper trading only
 Strategy: trivial (e.g. momentum threshold)
 
-Core Components (list only)
-Event queue / dispatcher
-Strategy (signal generator)
-Risk engine
-Execution simulator
-Portfolio state
+## Core Components
+
+### Event Infrastructure
+- **PriorityEventQueue** - Timestamp-ordered event processing (ensures deterministic execution)
+- **Dispatcher** - Routes events to multiple handlers (supports multiple handlers per event type)
+
+### Trading Components
+- **Strategies** - Pluggable signal generators (mean reversion, momentum, custom)
+- **Risk Engine** - `RealRiskManager` enforces limits (drawdown, position size, exposure)
+- **Execution Handler** - `RealisticExecutionHandler` simulates slippage, spread, market impact
+- **Portfolio State** - Single source of truth for cash, positions, PnL
+
+### Data & Analysis
+- **Data Loader** - CSV files and Yahoo Finance API support
+- **Equity Analyzer** - Performance metrics (drawdown, Sharpe ratio)
+- **Trade Metrics** - Realized/unrealized PnL, win rate, trade statistics
+- **Web Dashboard** - Streamlit UI for visualization
 
 Invariants 
 Examples:

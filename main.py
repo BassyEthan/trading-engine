@@ -10,7 +10,7 @@ from strategies.mean_reversion import RollingMeanReversionStrategy
 from strategies.hold_through_crash import HoldThroughCrashStrategy
 from strategies.multi_signal import MultiSignalStrategy
 from risk.engine import PassThroughRiskManager, RealRiskManager
-from execution.simulator import ExecutionHandler
+from execution.simulator import ExecutionHandler, RealisticExecutionHandler
 from portfolio.state import PortfolioState
 
 from analysis.metrics import TradeMetrics
@@ -170,7 +170,13 @@ def main():
         max_positions=None,  # No limit on number of positions
     )
     
-    execution = ExecutionHandler()
+    # Use realistic execution handler with slippage and spread costs
+    execution = RealisticExecutionHandler(
+        spread_pct=0.001,  # 0.1% bid-ask spread
+        base_slippage_pct=0.0005,  # 0.05% base slippage
+        impact_factor=0.000001,  # 0.0001% per share market impact
+        slippage_volatility=0.0002,  # 0.02% random variation
+    )
 
     # IMPORTANT: Register portfolio handler FIRST so prices are updated before strategies generate signals
     # This ensures risk manager sees the latest mark-to-market equity when checking drawdown
@@ -344,6 +350,20 @@ def main():
         else:
             print("\n--- RISK REJECTIONS ---")
             print("No trades rejected")
+    
+    # Execution cost summary
+    if hasattr(execution, 'get_execution_summary'):
+        exec_summary = execution.get_execution_summary()
+        if exec_summary["total_trades"] > 0:
+            print("\n--- EXECUTION COSTS ---")
+            print(f"Total trades: {exec_summary['total_trades']}")
+            print(f"Total spread cost: ${exec_summary['total_spread_cost']:,.2f}")
+            print(f"Total slippage cost: ${exec_summary['total_slippage_cost']:,.2f}")
+            print(f"Total execution cost: ${exec_summary['total_execution_cost']:,.2f}")
+            print(f"Average cost per trade: ${exec_summary['avg_cost_per_trade']:,.2f}")
+            if final_equity > 0:
+                cost_pct = (exec_summary['total_execution_cost'] / portfolio.initial_cash) * 100
+                print(f"Execution cost as % of initial capital: {cost_pct:.2f}%")
 
     #plot
     plot_equity(analyzer, show_price = False)

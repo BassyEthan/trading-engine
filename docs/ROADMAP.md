@@ -6,14 +6,14 @@ Focus on **robust execution** and **risk management** over strategy optimization
 
 ---
 
-## Phase 1: Risk Management (HIGH PRIORITY)
+## Phase 1: Risk Management ✅ COMPLETE
 **Goal**: Make the risk engine actually enforce limits and reject dangerous trades.
 
-### 1.1 Position Limits
-- [ ] Max position size per symbol (absolute and % of portfolio)
-- [ ] Max total exposure across all symbols
-- [ ] Max number of open positions
-- [ ] Per-symbol position limits (e.g., max 20% in single stock)
+### 1.1 Position Limits ✅
+- [x] Max position size per symbol (absolute and % of portfolio)
+- [x] Max total exposure across all symbols
+- [x] Max number of open positions
+- [ ] Per-symbol position limits (e.g., max 20% in single stock) - *Can be added via config*
 
 ### 1.2 Leverage Limits
 - [ ] Gross leverage limit (total long + total short exposure / equity)
@@ -21,22 +21,23 @@ Focus on **robust execution** and **risk management** over strategy optimization
 - [ ] Per-symbol leverage limits
 - [ ] Margin requirements calculation
 
-### 1.3 Drawdown Limits
-- [ ] Max drawdown threshold (hard stop)
+### 1.3 Drawdown Limits ✅
+- [x] Max drawdown threshold (hard stop at signal generation time)
 - [ ] Daily loss limit
 - [ ] Per-trade max loss limit
 - [ ] Circuit breaker (pause trading after X consecutive losses)
 
-### 1.4 Risk Event Logging
-- [ ] Log every rejected trade with reason
-- [ ] Track risk limit violations over time
+### 1.4 Risk Event Logging ✅
+- [x] Log every rejected trade with reason
+- [x] Track risk limit violations over time
+- [x] Rejection summary with breakdown by check type
 - [ ] Alert when approaching limits (80%, 90%, 95%)
 
-**Implementation**: Replace `PassThroughRiskManager` with `RealRiskManager` that checks all limits before approving orders.
+**Status**: `RealRiskManager` implemented and actively enforcing limits. See `docs/RISK_MANAGER_GUIDE.md` for details.
 
 ---
 
-## Phase 2: Execution Realism (HIGH PRIORITY)
+## Phase 2: Execution Realism ✅ PARTIALLY COMPLETE
 **Goal**: Simulate real-world execution costs and delays.
 
 ### 2.1 Latency Simulation
@@ -45,10 +46,11 @@ Focus on **robust execution** and **risk management** over strategy optimization
 - [ ] Exchange processing time
 - [ ] Queue position effects
 
-### 2.2 Slippage Modeling
-- [ ] Market impact (large orders move price)
-- [ ] Bid-ask spread costs
-- [ ] Volume-based slippage (more volume = more slippage)
+### 2.2 Slippage Modeling ✅
+- [x] Market impact (large orders move price) - *Size-based impact implemented*
+- [x] Bid-ask spread costs - *0.1% spread implemented*
+- [x] Base slippage - *0.05% base + random variation*
+- [ ] Volume-based slippage (more volume = more slippage) - *Can enhance current model*
 - [ ] Time-of-day effects (liquidity varies)
 
 ### 2.3 Partial Fills
@@ -56,23 +58,25 @@ Focus on **robust execution** and **risk management** over strategy optimization
 - [ ] Multiple fills for single order
 - [ ] Time-in-force handling (IOC, FOK, GTC)
 
-### 2.4 Execution Quality Metrics
-- [ ] Slippage tracking per trade
+### 2.4 Execution Quality Metrics ✅
+- [x] Slippage tracking per trade - *Total costs tracked*
+- [x] Execution cost summary - *Shows spread + slippage breakdown*
 - [ ] Implementation shortfall analysis
 - [ ] Fill rate statistics
 
-**Implementation**: Enhance `ExecutionHandler` to simulate realistic fills with delays and slippage.
+**Status**: `RealisticExecutionHandler` implemented with slippage, spread, and market impact. Latency and partial fills pending. See `docs/EXECUTION_REALISM.md` for details.
 
 ---
 
-## Phase 3: Data Infrastructure (MEDIUM PRIORITY)
+## Phase 3: Data Infrastructure ✅ PARTIALLY COMPLETE
 **Goal**: Move from hardcoded data to real market data handling.
 
-### 3.1 Historical Data Loading
-- [ ] CSV/Parquet file readers
-- [ ] OHLCV data support (not just last price)
-- [ ] Multiple data sources (Yahoo Finance, Alpha Vantage, etc.)
-- [ ] Data validation and cleaning
+### 3.1 Historical Data Loading ✅
+- [x] CSV file readers - *Single and multi-symbol support*
+- [ ] Parquet file readers
+- [ ] OHLCV data support (not just last price) - *Currently uses close price*
+- [x] Multiple data sources - *CSV and Yahoo Finance implemented*
+- [ ] Data validation and cleaning - *Basic error handling*
 
 ### 3.2 Order Book Simulation
 - [ ] Bid/ask levels (not just mid-price)
@@ -85,13 +89,15 @@ Focus on **robust execution** and **risk management** over strategy optimization
 - [ ] Live market data feeds
 - [ ] Data buffering and replay
 
+**Status**: `DataLoader` implemented with CSV and Yahoo Finance support. See `data/README.md` for usage.
+
 ---
 
-## Phase 4: Portfolio Analytics (MEDIUM PRIORITY)
+## Phase 4: Portfolio Analytics ✅ PARTIALLY COMPLETE
 **Goal**: Better understanding of portfolio behavior and risk.
 
 ### 4.1 Exposure Tracking
-- [ ] Net exposure per symbol
+- [x] Net exposure per symbol - *Tracked in portfolio state*
 - [ ] Gross exposure (long + short)
 - [ ] Sector/industry exposure
 - [ ] Correlation analysis
@@ -99,21 +105,25 @@ Focus on **robust execution** and **risk management** over strategy optimization
 ### 4.2 Advanced Metrics
 - [ ] Sortino ratio (downside deviation)
 - [ ] Calmar ratio (return / max drawdown)
-- [ ] Win rate by strategy
-- [ ] Average win vs average loss
+- [x] Win rate by strategy - *Win rate calculated*
+- [x] Average win vs average loss - *Avg PnL per trade*
 - [ ] Profit factor
 
 ### 4.3 Attribution Analysis
 - [ ] PnL attribution by symbol
 - [ ] PnL attribution by strategy
-- [ ] Realized vs unrealized PnL breakdown
+- [x] Realized vs unrealized PnL breakdown - *Shown in metrics*
 - [ ] Time-weighted returns
 
 ### 4.4 Risk Metrics
+- [x] Max drawdown - *Calculated and displayed*
+- [x] Sharpe ratio - *Calculated and displayed*
 - [ ] Value at Risk (VaR)
 - [ ] Expected Shortfall (CVaR)
 - [ ] Beta calculation (if benchmark provided)
 - [ ] Correlation matrix
+
+**Status**: Basic metrics implemented. Advanced analytics pending.
 
 ---
 
@@ -203,27 +213,29 @@ Focus on **robust execution** and **risk management** over strategy optimization
 
 ---
 
-## Recommended Implementation Order
+## Implementation Status
 
-### Immediate (Next 2-4 weeks)
-1. **Real Risk Manager** - Replace PassThrough with actual limit checks
-2. **Execution Slippage** - Add basic slippage modeling
-3. **Better Logging** - Log all risk rejections with reasons
+### ✅ Completed
+1. **Real Risk Manager** - `RealRiskManager` enforces drawdown, position size, exposure limits
+2. **Execution Realism** - `RealisticExecutionHandler` with slippage, spread, market impact
+3. **Risk Logging** - Comprehensive rejection tracking and reporting
+4. **Historical Data Loading** - CSV and Yahoo Finance support
+5. **Timestamp-Ordered Processing** - `PriorityEventQueue` for deterministic execution
+6. **Web Dashboard** - Streamlit UI for visualization
+7. **Better Metrics** - Realized/unrealized PnL, execution costs
+8. **Multi-Symbol Support** - Trade multiple assets simultaneously
 
-### Short-term (1-3 months)
-4. **Historical Data Loading** - Move from hardcoded to file-based
-5. **Advanced Metrics** - Sortino, Calmar, attribution
-6. **Unit Tests** - Test core invariants
+### 🚧 In Progress / Next Steps
+1. **Advanced Metrics** - Sortino, Calmar, attribution analysis
+2. **Execution Latency** - Add realistic order-to-fill delays
+3. **Partial Fills** - Orders can fill partially
+4. **Order Types** - Limit orders, stop-loss, take-profit
 
-### Medium-term (3-6 months)
-7. **Execution Latency** - Add realistic delays
-8. **Exposure Tracking** - Multi-asset risk
-9. **Backtesting Framework** - Walk-forward analysis
-
-### Long-term (6+ months)
-10. **Order Book Simulation** - Realistic market microstructure
-11. **Real-Time Data** - Live feeds
-12. **Dashboard** - Real-time monitoring
+### 📋 Planned
+1. **Backtesting Framework** - Walk-forward analysis, parameter optimization
+2. **Order Book Simulation** - Realistic market microstructure
+3. **Real-Time Data** - Live feeds and WebSocket support
+4. **Advanced Risk Analytics** - VaR, correlation analysis
 
 ---
 
