@@ -9,6 +9,8 @@ from strategies.one_shot import OneShotBuyStrategy
 from strategies.mean_reversion import RollingMeanReversionStrategy
 from strategies.hold_through_crash import HoldThroughCrashStrategy
 from strategies.multi_signal import MultiSignalStrategy
+from strategies.ml_strategy import MLStrategy
+
 from risk.engine import PassThroughRiskManager, RealRiskManager
 from execution.simulator import ExecutionHandler, RealisticExecutionHandler
 from portfolio.state import PortfolioState
@@ -60,10 +62,11 @@ STRATEGY_CONFIG = {
         "params": {}
     },
     "NVDA": {
-        "class": RollingMeanReversionStrategy,
+        "class": MLStrategy,
         "params": {
-            "window": 3,
-            "threshold": 1.5,
+            "model_path": "ml/models/price_direction_model.pkl",
+            "buy_threshold": 0.51,  # Threshold for BUY signals (prob > this)
+            # Note: sell_threshold is ignored - strategy uses buy_threshold for both entry/exit
         }
     }
 }
@@ -205,17 +208,22 @@ def main():
 
     market_events = []
 
-    t=0
-    for symbol, prices in PRICE_DATA.items():
-        for price in prices:
-            event = MarketEvent(
-                timestamp = t,
-                symbol = symbol,
-                price = price
-            )
-            market_events.append(event)
-            queue.put(event)
-            t+=1
+    # Interleave events by index (all symbols at index 0, then all at index 1, etc.)
+    # This simulates realistic trading where multiple symbols trade simultaneously
+    max_length = max(len(prices) for prices in PRICE_DATA.values()) if PRICE_DATA else 0
+    
+    t = 0
+    for i in range(max_length):
+        for symbol, prices in PRICE_DATA.items():
+            if i < len(prices):
+                event = MarketEvent(
+                    timestamp = t,
+                    symbol = symbol,
+                    price = prices[i]
+                )
+                market_events.append(event)
+                queue.put(event)
+        t += 1
         
         
 

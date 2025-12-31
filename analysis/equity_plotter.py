@@ -33,7 +33,33 @@ def plot_equity(analyzer: EquityAnalyzer, show_price: bool = True):
     for start, end in analyzer.holding_periods:
         ax_eq.axvspan(start, end, color = "gray", alpha = 0.12)
 
-    #trade annotations
+    #entry markers with symbols
+    for x, equity_val, symbol in analyzer.entry_markers:
+        ax_eq.scatter(
+            x,
+            equity_val,
+            color = "#2ca02c",
+            marker = "^",
+            s = 80,
+            edgecolors = "black",
+            linewidths = 1,
+            zorder = 4,
+            alpha = 0.7
+        )
+        ax_eq.text(
+            x,
+            equity_val,
+            symbol,
+            fontsize = 8,
+            ha = "center",
+            va = "bottom",
+            color = "#2ca02c",
+            fontweight = "bold",
+            bbox = dict(boxstyle = "round,pad=0.3", facecolor = "white", edgecolor = "#2ca02c", alpha = 0.8),
+            zorder = 5
+        )
+
+    #trade annotations (exit PnL)
     for x, _, pnl in analyzer.trade_markers:
         ax_eq.text(
             x,
@@ -41,7 +67,7 @@ def plot_equity(analyzer: EquityAnalyzer, show_price: bool = True):
             f"{pnl:+.0f}",
             fontsize = 9,
             ha = "center",
-            va = "bottom",
+            va = "top",
             color = "#2ca02c" if pnl > 0 else "#d62728", 
             fontweight = "bold",
             zorder = 5

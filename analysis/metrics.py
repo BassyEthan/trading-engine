@@ -21,24 +21,38 @@ class TradeMetrics:
 
     def _compute_trade_pnls(self) -> List[float]:
         # pairs BUY and SELL fills into round trips and compute PnL per trade.
-        #if BUY then remember entry, if SELL than compute PnL and close trade
+        # Supports multiple symbols by tracking entry_price and quantity per symbol
         trade_pnls = []
-        entry_price = None
-        quantity = None
+        entries = {}  # {symbol: (entry_price, quantity)}
 
         for fill in self.fills:
             if fill.direction == "BUY":
-                entry_price = fill.fill_price
-                quantity = fill.quantity
+                # Store entry for this symbol
+                entries[fill.symbol] = (fill.fill_price, fill.quantity)
             
             elif fill.direction == "SELL":
-                assert entry_price is not None
-                assert quantity is not None
-                pnl = (fill.fill_price - entry_price) * quantity
+                # Find matching entry for this symbol
+                if fill.symbol not in entries:
+                    # SELL without matching BUY - skip or warn
+                    # This can happen if portfolio started with positions or data issue
+                    continue
+                
+                entry_price, entry_quantity = entries[fill.symbol]
+                
+                # Calculate PnL (use minimum of entry and exit quantities for partial fills)
+                closing_quantity = min(entry_quantity, fill.quantity)
+                pnl = (fill.fill_price - entry_price) * closing_quantity
                 trade_pnls.append(pnl)
 
-                entry_price = None
-                quantity = None
+                # Update or remove entry
+                if fill.quantity >= entry_quantity:
+                    # Fully closed
+                    del entries[fill.symbol]
+                else:
+                    # Partially closed
+                    remaining_quantity = entry_quantity - fill.quantity
+                    entries[fill.symbol] = (entry_price, remaining_quantity)
+        
         return trade_pnls
     
     def total_pnl(self) -> float:

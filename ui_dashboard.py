@@ -70,15 +70,19 @@ def run_simulation():
     dispatcher.register_handler(OrderEvent, execution.handle_order)
     dispatcher.register_handler(FillEvent, portfolio.handle_fill)
     
-    # Seed market events
+    # Seed market events - interleave by index (all symbols at index 0, then all at index 1, etc.)
+    # This simulates realistic trading where multiple symbols trade simultaneously
+    max_length = max(len(prices) for prices in PRICE_DATA.values()) if PRICE_DATA else 0
+    
     market_events = []
     t = 0
-    for symbol, prices in PRICE_DATA.items():
-        for price in prices:
-            event = MarketEvent(timestamp=t, symbol=symbol, price=price)
-            market_events.append(event)
-            queue.put(event)
-            t += 1
+    for i in range(max_length):
+        for symbol, prices in PRICE_DATA.items():
+            if i < len(prices):
+                event = MarketEvent(timestamp=t, symbol=symbol, price=prices[i])
+                market_events.append(event)
+                queue.put(event)
+        t += 1
     
     # Event loop
     while not queue.is_empty():
@@ -180,14 +184,51 @@ def run_simulation():
         'execution_costs': execution_costs,
     }
 
-def plot_equity_curve(equity_curve, market_events):
-    """Create equity curve plot."""
+def plot_equity_curve(equity_curve, market_events, fills=None):
+    """Create equity curve plot with entry markers."""
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
     
     # Equity curve
     times = [e.timestamp for e in market_events]
     ax1.plot(times, equity_curve, 'b-', linewidth=2, label='Equity')
     ax1.axhline(y=equity_curve[0], color='gray', linestyle='--', alpha=0.5, label='Initial Capital')
+    
+    # Add entry markers with symbols
+    if fills:
+        # Create timestamp to index mapping
+        timestamp_to_index = {e.timestamp: i for i, e in enumerate(market_events)}
+        
+        # Track BUY entries
+        for fill in fills:
+            if fill.direction == "BUY" and fill.timestamp in timestamp_to_index:
+                idx = timestamp_to_index[fill.timestamp]
+                if idx < len(equity_curve):
+                    # Plot marker
+                    ax1.scatter(
+                        fill.timestamp,
+                        equity_curve[idx],
+                        color='#2ca02c',
+                        marker='^',
+                        s=100,
+                        edgecolors='black',
+                        linewidths=1,
+                        zorder=4,
+                        alpha=0.8
+                    )
+                    # Add symbol label
+                    ax1.text(
+                        fill.timestamp,
+                        equity_curve[idx],
+                        fill.symbol,
+                        fontsize=8,
+                        ha='center',
+                        va='bottom',
+                        color='#2ca02c',
+                        fontweight='bold',
+                        bbox=dict(boxstyle='round,pad=0.3', facecolor='white', edgecolor='#2ca02c', alpha=0.8),
+                        zorder=5
+                    )
+    
     ax1.set_ylabel('Equity ($)', fontsize=12)
     ax1.set_title('Portfolio Equity Curve', fontsize=14, fontweight='bold')
     ax1.grid(True, alpha=0.3)
@@ -242,7 +283,7 @@ st.markdown("""
     .section-header {
         font-size: 0.85rem;
         font-weight: 600;
-        color: #ffffff !important;
+        color: #1a1a1a !important;
         margin-top: 1.5rem;
         margin-bottom: 1rem;
         padding-bottom: 0.5rem;
@@ -255,7 +296,7 @@ st.markdown("""
     .subsection-header {
         font-size: 0.9rem;
         font-weight: 600;
-        color: #ffffff !important;
+        color: #1a1a1a !important;
         margin-top: 1.25rem;
         margin-bottom: 0.75rem;
         background: transparent !important;
@@ -270,7 +311,7 @@ st.markdown("""
     
     .metric-label {
         font-size: 0.75rem;
-        color: #ffffff;
+        color: #666666 !important;
         text-transform: uppercase;
         letter-spacing: 0.5px;
         margin-bottom: 0.25rem;
@@ -343,7 +384,7 @@ return_pct = (total_return / 10000) * 100
 col1, col2, col3, col4 = st.columns(4)
 with col1:
     st.markdown('<div class="metric-label">Final Equity</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="metric-value">${final_equity:,.2f}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="metric-value" style="color: #ffffff !important;">${final_equity:,.2f}</div>', unsafe_allow_html=True)
 with col2:
     st.markdown('<div class="metric-label">Total Return</div>', unsafe_allow_html=True)
     color_class = "profit" if return_pct >= 0 else "loss"
@@ -361,7 +402,7 @@ st.markdown("<br>", unsafe_allow_html=True)
 
 # Equity curve plot
 st.markdown('<div class="section-header">Equity Curve & Drawdown</div>', unsafe_allow_html=True)
-fig = plot_equity_curve(equity_curve, market_events)
+fig = plot_equity_curve(equity_curve, market_events, fills=portfolio.trades)
 st.pyplot(fig)
 plt.close(fig)
 st.markdown("<br>", unsafe_allow_html=True)
@@ -370,7 +411,7 @@ st.markdown("<br>", unsafe_allow_html=True)
 col1, col2 = st.columns(2)
 
 with col1:
-    st.markdown('<div class="section-header">Portfolio State</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header" style="color: #ffffff !important;">Portfolio State</div>', unsafe_allow_html=True)
     
     # Cash
     st.markdown(f"""
@@ -380,7 +421,7 @@ with col1:
     </div>
     """, unsafe_allow_html=True)
     
-    st.markdown('<div class="subsection-header">Open Positions</div>', unsafe_allow_html=True)
+    st.markdown('<div class="subsection-header" style="color: #ffffff !important;">Open Positions</div>', unsafe_allow_html=True)
     if portfolio.positions:
         for symbol, position in portfolio.positions.items():
             current_price = portfolio.latest_prices.get(symbol, 0)
@@ -422,7 +463,7 @@ with col1:
         </div>
         """, unsafe_allow_html=True)
     
-    st.markdown('<div class="subsection-header" style="margin-top: 1.5rem;">Final Equity</div>', unsafe_allow_html=True)
+    st.markdown('<div class="subsection-header" style="margin-top: 1.5rem; color: #ffffff !important;">Final Equity</div>', unsafe_allow_html=True)
     st.markdown(f"""
     <div class="stat-box">
         <div class="metric-value">${final_equity:,.2f}</div>
@@ -430,7 +471,7 @@ with col1:
     """, unsafe_allow_html=True)
 
 with col2:
-    st.markdown('<div class="section-header">Performance Metrics</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header" style="color: #ffffff !important;">Performance Metrics</div>', unsafe_allow_html=True)
     
     # Capital metrics
     st.markdown('<div class="subsection-header">Capital</div>', unsafe_allow_html=True)
@@ -451,7 +492,7 @@ with col2:
         """, unsafe_allow_html=True)
     
     # Returns
-    st.markdown('<div class="subsection-header" style="margin-top: 1rem;">Returns</div>', unsafe_allow_html=True)
+    st.markdown('<div class="subsection-header" style="margin-top: 1rem; color: #ffffff !important;">Returns</div>', unsafe_allow_html=True)
     realized_pnl = portfolio.cash - metrics.initial_cash
     unrealized_pnl = final_equity - portfolio.cash
     return_class = "profit" if return_pct >= 0 else "loss"
@@ -475,7 +516,7 @@ with col2:
     """, unsafe_allow_html=True)
     
     # Trading statistics
-    st.markdown('<div class="subsection-header" style="margin-top: 1rem;">Trading Statistics</div>', unsafe_allow_html=True)
+    st.markdown('<div class="subsection-header" style="margin-top: 1rem; color: #ffffff !important;">Trading Statistics</div>', unsafe_allow_html=True)
     col_stat1, col_stat2 = st.columns(2)
     with col_stat1:
         st.markdown(f"""

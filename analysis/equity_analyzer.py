@@ -18,6 +18,7 @@ class EquityAnalyzer:
         self.drawdown_curve: List[float] = []
         self.max_drawdown: float = 0.0
         self.trade_markers: List[Tuple[int, float, float]] = []
+        self.entry_markers: List[Tuple[int, float, str]] = []  # (timestamp_index, equity_value, symbol)
         self.holding_periods: List[Tuple[int, int]] = []
         self.sharpe: float = 0.0
 
@@ -42,6 +43,9 @@ class EquityAnalyzer:
                 if fill.direction == "BUY":
                     open_price = fill.fill_price
                     entry_idx = i
+                    # Track entry with symbol
+                    if i < len(self.equity_curve):
+                        self.entry_markers.append((i, self.equity_curve[i], fill.symbol))
 
                 elif fill.direction == "SELL":
                     if open_price is not None:
@@ -65,11 +69,13 @@ class EquityAnalyzer:
                     if prev_equity > 0:
                         returns.append((equity_value - prev_equity) / prev_equity)
 
-                # drawdown
+                # drawdown (stored as negative, but max_drawdown should be positive)
                 peak = max(peak, equity_value)
-                self.drawdown_curve.append((equity_value - peak) / peak)
+                dd = (equity_value - peak) / peak  # Negative value (e.g., -0.15 for 15% drop)
+                self.drawdown_curve.append(dd)
         
-        self.max_drawdown = min(self.drawdown_curve) if self.drawdown_curve else 0.0
+        # Max drawdown is the most negative value (worst drop), convert to positive
+        self.max_drawdown = abs(min(self.drawdown_curve)) if self.drawdown_curve else 0.0
         self.sharpe = self._compute_sharpe(returns)
 
     def _compute_sharpe(self, returns: List[float]) -> float:
