@@ -10,6 +10,7 @@ from strategies.mean_reversion import RollingMeanReversionStrategy
 from strategies.hold_through_crash import HoldThroughCrashStrategy
 from strategies.multi_signal import MultiSignalStrategy
 from strategies.ml_strategy import MLStrategy
+from strategies.macd import MACDStrategy
 
 from risk.engine import PassThroughRiskManager, RealRiskManager
 from execution.simulator import ExecutionHandler, RealisticExecutionHandler
@@ -34,39 +35,31 @@ from analysis.equity_plotter import plot_equity
 
 STRATEGY_CONFIG = {
     "APPL": {
-        "class": RollingMeanReversionStrategy,
+        "class": MACDStrategy,
         "params": {
-            "window": 5,
-            "threshold": 2.0,
+  
         }
     },
     "MSFT": {
-        "class": MultiSignalStrategy,
+        "class": MACDStrategy,
         "params": {
-            "signals": [
-                (12, "BUY"),   # Buy at t=12 (before crash)
-                (14, "BUY"),   # Try to buy again at t=14 (during crash, drawdown > 15%)
-                (22, "SELL"),  # Sell at t=22
-            ]
+            
         }
     },
     "GOOGL": {
-        "class": RollingMeanReversionStrategy,
+        "class": MACDStrategy,
         "params": {
-            "window": 5,
-            "threshold": 2.0,
+           
         }
     },
     "TSLA": {
-        "class": OneShotBuyStrategy,
+        "class": MACDStrategy,
         "params": {}
     },
     "NVDA": {
-        "class": MLStrategy,
+        "class": MACDStrategy,
         "params": {
-            "model_path": "ml/models/price_direction_model.pkl",
-            "buy_threshold": 0.51,  # Threshold for BUY signals (prob > this)
-            # Note: sell_threshold is ignored - strategy uses buy_threshold for both entry/exit
+         
         }
     }
 }
@@ -75,39 +68,23 @@ STRATEGY_CONFIG = {
 # MARKET DATA CONFIGURATION
 # ----------------------
 
-# Option 1: Use fake data for testing 
-USE_FAKE_DATA = False
-FAKE_PRICE_DATA = {
-    "APPL": [100, 101, 102, 100, 100, 97, 100, 103, 98, 94, 96, 101],
-    "MSFT": [200, 202, 1, 10, 105, 105, 1, 206, 207, 100, 200],
-    "GOOGL": [150, 152, 148, 151, 149, 153, 150, 155, 152, 154, 151, 153],
-    "TSLA": [300, 305, 295, 302, 298, 310, 308, 315, 312, 320, 318, 325],
-    "NVDA": [400, 405, 395, 402, 398, 410, 408, 415, 412, 420, 418, 425],
-}
-
-# Option 2: Load from CSV files
-# Set USE_FAKE_DATA = False and configure:
+# Option 1: Load from CSV files
 CSV_DATA_DIR = "data/"  # Directory containing CSV files
 CSV_PATTERN = "*.csv"   # File pattern
 
-# Option 3: Load from Yahoo Finance
-# Set USE_FAKE_DATA = False and configure:
+# Option 2: Load from Yahoo Finance
 YAHOO_SYMBOLS = ["AAPL", "MSFT", "GOOGL", "TSLA", "NVDA"]
 YAHOO_START_DATE = "2024-01-01"
 YAHOO_END_DATE = "2024-12-31"
 
-# Load market data based on configuration
+# Load market data from Yahoo Finance only
 def load_price_data():
-    """Load market data from configured source."""
-    if USE_FAKE_DATA:
-        return FAKE_PRICE_DATA
-    
+    """Load market data from Yahoo Finance. Returns (prices_dict, dates_dict)."""
     from data.loader import load_market_data
     
-    data = {}
     errors = []
     
-    # Try CSV directory first
+    # Try CSV directory first (if exists)
     if Path(CSV_DATA_DIR).exists():
         try:
             csv_data = load_market_data(
@@ -117,7 +94,8 @@ def load_price_data():
             )
             if csv_data:
                 print(f"✓ Loaded {len(csv_data)} symbols from CSV: {list(csv_data.keys())}")
-                return csv_data
+                # CSV doesn't have dates, return None for dates
+                return csv_data, None
             else:
                 errors.append(f"CSV directory '{CSV_DATA_DIR}' exists but contains no valid data files")
         except Exception as e:
@@ -127,15 +105,26 @@ def load_price_data():
     
     # Try Yahoo Finance
     try:
-        yahoo_data = load_market_data(
+        result = load_market_data(
             "yahoo",
             symbols=YAHOO_SYMBOLS,
             start_date=YAHOO_START_DATE,
             end_date=YAHOO_END_DATE,
+            return_dates=True,
         )
+        if isinstance(result, tuple):
+            yahoo_data, dates_data = result
+        else:
+            yahoo_data = result
+            dates_data = None
+            
         if yahoo_data:
             print(f"✓ Loaded {len(yahoo_data)} symbols from Yahoo Finance: {list(yahoo_data.keys())}")
-            return yahoo_data
+            if dates_data:
+                print(f"  Data points per symbol:")
+                for sym in yahoo_data.keys():
+                    print(f"    {sym}: {len(yahoo_data[sym])} points")
+            return yahoo_data, dates_data
         else:
             errors.append("Yahoo Finance returned no data")
     except Exception as e:
@@ -147,10 +136,10 @@ def load_price_data():
         error_msg += "\n".join(f"  - {err}" for err in errors)
     error_msg += f"\n\nCSV directory checked: {CSV_DATA_DIR} (exists: {Path(CSV_DATA_DIR).exists()})"
     error_msg += f"\nYahoo Finance symbols: {YAHOO_SYMBOLS}"
-    error_msg += "\n\nTo use fake data for testing, set USE_FAKE_DATA = True in main.py"
+    error_msg += "\n\nPlease ensure you have internet connectivity and valid symbols configured."
     raise RuntimeError(error_msg)
 
-PRICE_DATA = load_price_data()
+PRICE_DATA, DATE_DATA = load_price_data()
 
 def main():
     
@@ -207,6 +196,26 @@ def main():
     dispatcher.register_handler(FillEvent, portfolio.handle_fill)
 
     market_events = []
+    
+    # Create date mapping: timestamp -> date
+    # Since we interleave events by index, all symbols at index i share the same date
+    # Use dates from first symbol that has dates, or None if no dates available
+    dates_list = None
+    if DATE_DATA:
+        # Find first symbol with dates - all symbols should have same dates for same index
+        for symbol in PRICE_DATA.keys():
+            if symbol in DATE_DATA and DATE_DATA[symbol]:
+                dates_list = DATE_DATA[symbol]
+                print(f"\n✓ Using dates from {symbol}: {len(dates_list)} dates")
+                if dates_list:
+                    print(f"  Date range: {dates_list[0]} to {dates_list[-1]}")
+                    print(f"  First date type: {type(dates_list[0])}, value: {repr(dates_list[0])}")
+                    # Verify dates are reasonable (not 1970)
+                    if dates_list[0].year < 2020:
+                        print(f"  ⚠️  WARNING: First date year is {dates_list[0].year}, expected 2024!")
+                break
+    else:
+        print("\n⚠️  No date data available - using timestamps for x-axis")
 
     # Interleave events by index (all symbols at index 0, then all at index 1, etc.)
     # This simulates realistic trading where multiple symbols trade simultaneously
@@ -286,6 +295,21 @@ def main():
     # If no events, use initial cash
     if not aligned_equity_curve:
         aligned_equity_curve = [portfolio.initial_cash] * len(market_events)
+    
+    # Create dates array aligned with market events (one date per market event)
+    # Each market event at timestamp t should use dates_list[t]
+    dates_for_plotting = None
+    if dates_list:
+        dates_for_plotting = []
+        for event in market_events:
+            if event.timestamp < len(dates_list):
+                dates_for_plotting.append(dates_list[event.timestamp])
+            else:
+                # Fallback if timestamp is out of range
+                dates_for_plotting.append(dates_list[-1] if dates_list else None)
+        print(f"\n✓ Created dates array for plotting: {len(dates_for_plotting)} dates")
+        if dates_for_plotting:
+            print(f"  Date range in plot: {dates_for_plotting[0]} to {dates_for_plotting[-1]}")
     
     #analysis
     analyzer = EquityAnalyzer(
@@ -374,7 +398,7 @@ def main():
                 print(f"Execution cost as % of initial capital: {cost_pct:.2f}%")
 
     #plot
-    plot_equity(analyzer, show_price = False)
+    plot_equity(analyzer, show_price = False, dates = dates_for_plotting)
 
 
 

@@ -27,7 +27,7 @@ from analysis.metrics import TradeMetrics
 from analysis.equity_analyzer import EquityAnalyzer
 
 # Import config from main
-from main import PRICE_DATA, STRATEGY_CONFIG
+from main import PRICE_DATA, DATE_DATA, STRATEGY_CONFIG
 
 def run_simulation():
     """Run the trading simulation and return all results."""
@@ -69,6 +69,18 @@ def run_simulation():
     dispatcher.register_handler(SignalEvent, risk.handle_signal)
     dispatcher.register_handler(OrderEvent, execution.handle_order)
     dispatcher.register_handler(FillEvent, portfolio.handle_fill)
+    
+    # Get dates if available
+    dates_list = None
+    if DATE_DATA:
+        # Find first symbol with dates
+        for symbol in PRICE_DATA.keys():
+            if symbol in DATE_DATA and DATE_DATA[symbol]:
+                dates_list = DATE_DATA[symbol]
+                print(f"✓ Using dates from {symbol}: {len(dates_list)} dates")
+                if dates_list:
+                    print(f"  Date range: {dates_list[0]} to {dates_list[-1]}")
+                break
     
     # Seed market events - interleave by index (all symbols at index 0, then all at index 1, etc.)
     # This simulates realistic trading where multiple symbols trade simultaneously
@@ -134,6 +146,17 @@ def run_simulation():
     if not aligned_equity_curve:
         aligned_equity_curve = [portfolio.initial_cash] * len(market_events)
     
+    # Create dates array aligned with market events (one date per market event)
+    dates_for_plotting = None
+    if dates_list:
+        dates_for_plotting = []
+        for event in market_events:
+            if event.timestamp < len(dates_list):
+                dates_for_plotting.append(dates_list[event.timestamp])
+            else:
+                # Fallback if timestamp is out of range
+                dates_for_plotting.append(dates_list[-1] if dates_list else None)
+    
     # Calculate final equity
     final_equity = portfolio.cash
     for symbol, position in portfolio.positions.items():
@@ -182,14 +205,37 @@ def run_simulation():
         'equity_curve': aligned_equity_curve,
         'final_equity': final_equity,
         'execution_costs': execution_costs,
+        'dates': dates_for_plotting,
     }
 
-def plot_equity_curve(equity_curve, market_events, fills=None):
+def plot_equity_curve(equity_curve, market_events, fills=None, dates=None):
     """Create equity curve plot with entry markers."""
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
     
+    # Use dates if available, otherwise use timestamps
+    # Ensure dates are properly formatted datetime objects
+    if dates and len(dates) == len(equity_curve):
+        from datetime import datetime
+        # Verify dates are datetime objects
+        times = []
+        for d in dates:
+            if isinstance(d, datetime):
+                times.append(d)
+            elif isinstance(d, (int, float)):
+                # If it's a number, it might be a Unix timestamp - convert it
+                try:
+                    times.append(datetime.fromtimestamp(d))
+                except (ValueError, OSError):
+                    # If timestamp is too large/small, use fallback
+                    times.append(datetime.now())
+            else:
+                times.append(datetime.now())
+        xlabel = 'Date'
+    else:
+        times = [e.timestamp for e in market_events[:len(equity_curve)]]
+        xlabel = 'Time'
+    
     # Equity curve
-    times = [e.timestamp for e in market_events]
     ax1.plot(times, equity_curve, 'b-', linewidth=2, label='Equity')
     ax1.axhline(y=equity_curve[0], color='gray', linestyle='--', alpha=0.5, label='Initial Capital')
     
@@ -203,9 +249,10 @@ def plot_equity_curve(equity_curve, market_events, fills=None):
             if fill.direction == "BUY" and fill.timestamp in timestamp_to_index:
                 idx = timestamp_to_index[fill.timestamp]
                 if idx < len(equity_curve):
+                    x_pos = times[idx] if idx < len(times) else fill.timestamp
                     # Plot marker
                     ax1.scatter(
-                        fill.timestamp,
+                        x_pos,
                         equity_curve[idx],
                         color='#2ca02c',
                         marker='^',
@@ -217,7 +264,7 @@ def plot_equity_curve(equity_curve, market_events, fills=None):
                     )
                     # Add symbol label
                     ax1.text(
-                        fill.timestamp,
+                        x_pos,
                         equity_curve[idx],
                         fill.symbol,
                         fontsize=8,
@@ -245,7 +292,19 @@ def plot_equity_curve(equity_curve, market_events, fills=None):
     
     ax2.fill_between(times, drawdown, 0, color='red', alpha=0.3, label='Drawdown')
     ax2.plot(times, drawdown, 'r-', linewidth=1.5)
-    ax2.set_xlabel('Time', fontsize=12)
+    ax2.set_xlabel(xlabel, fontsize=12)
+    
+    # Format x-axis dates if available
+    if dates and len(dates) == len(equity_curve):
+        from matplotlib.dates import DateFormatter, AutoDateLocator
+        fig.autofmt_xdate()  # Rotate date labels
+        # Use DateFormatter for better date spacing
+        date_format = DateFormatter('%Y-%m-%d')
+        ax1.xaxis.set_major_formatter(date_format)
+        ax2.xaxis.set_major_formatter(date_format)
+        # Auto-adjust date locator for better spacing
+        ax1.xaxis.set_major_locator(AutoDateLocator())
+        ax2.xaxis.set_major_locator(AutoDateLocator())
     ax2.set_ylabel('Drawdown', fontsize=12)
     ax2.set_title('Portfolio Drawdown', fontsize=14, fontweight='bold')
     ax2.grid(True, alpha=0.3)
@@ -402,7 +461,7 @@ st.markdown("<br>", unsafe_allow_html=True)
 
 # Equity curve plot
 st.markdown('<div class="section-header">Equity Curve & Drawdown</div>', unsafe_allow_html=True)
-fig = plot_equity_curve(equity_curve, market_events, fills=portfolio.trades)
+fig = plot_equity_curve(equity_curve, market_events, fills=portfolio.trades, dates=results.get('dates'))
 st.pyplot(fig)
 plt.close(fig)
 st.markdown("<br>", unsafe_allow_html=True)

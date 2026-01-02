@@ -5,7 +5,7 @@ Supports CSV files and can be extended for APIs (Yahoo Finance, Alpha Vantage, e
 
 import csv
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple, Union
 from datetime import datetime
 import sys
 
@@ -162,7 +162,8 @@ class DataLoader:
         symbols: List[str],
         start_date: str,
         end_date: str,
-    ) -> Dict[str, List[float]]:
+        return_dates: bool = False,
+    ) -> Union[Dict[str, List[float]], Tuple[Dict[str, List[float]], Dict[str, List[datetime]]]]:
         """
         Load data from Yahoo Finance API.
         
@@ -172,9 +173,11 @@ class DataLoader:
             symbols: List of symbols to fetch
             start_date: Start date (YYYY-MM-DD)
             end_date: End date (YYYY-MM-DD)
+            return_dates: If True, also return dates for each symbol
             
         Returns:
-            Dict mapping symbol to list of closing prices
+            If return_dates=False: Dict mapping symbol to list of closing prices
+            If return_dates=True: Tuple of (prices_dict, dates_dict)
         """
         try:
             import yfinance as yf
@@ -184,6 +187,7 @@ class DataLoader:
             )
         
         data: Dict[str, List[float]] = {}
+        dates_dict: Dict[str, List[datetime]] = {} if return_dates else {}
         
         for symbol in symbols:
             try:
@@ -198,10 +202,42 @@ class DataLoader:
                 prices = df['Close'].tolist()
                 data[symbol.upper()] = prices
                 
+                # Extract dates if requested
+                if return_dates:
+                    # Convert pandas Timestamp to Python datetime
+                    dates = []
+                    for pd_timestamp in df.index:
+                        try:
+                            # Try to_pydatetime first (most reliable)
+                            if hasattr(pd_timestamp, 'to_pydatetime'):
+                                dt = pd_timestamp.to_pydatetime()
+                            # If it's already a datetime, use it
+                            elif isinstance(pd_timestamp, datetime):
+                                dt = pd_timestamp
+                            # If it's a pandas Timestamp, convert it
+                            elif hasattr(pd_timestamp, 'date'):
+                                dt = pd_timestamp.to_pydatetime() if hasattr(pd_timestamp, 'to_pydatetime') else datetime.combine(pd_timestamp.date(), datetime.min.time())
+                            else:
+                                # Last resort: convert string or use current method
+                                dt = datetime.fromisoformat(str(pd_timestamp)) if isinstance(str(pd_timestamp), str) and '-' in str(pd_timestamp) else datetime.now()
+                            dates.append(dt)
+                        except Exception as e:
+                            print(f"Warning: Failed to convert date {pd_timestamp} for {symbol}: {e}")
+                            # Fallback to a placeholder date
+                            dates.append(datetime.now())
+                    
+                    dates_dict[symbol.upper()] = dates
+                    # Debug: print first and last dates
+                    if dates:
+                        print(f"  {symbol}: Dates from {dates[0]} to {dates[-1]} ({len(dates)} dates)")
+                        print(f"    First date type: {type(dates[0])}, value: {repr(dates[0])}")
+                
             except Exception as e:
                 print(f"Warning: Failed to fetch {symbol}: {e}")
                 continue
         
+        if return_dates:
+            return data, dates_dict
         return data
 
 
@@ -254,11 +290,14 @@ def load_market_data(
         )
     
     elif source == "yahoo":
-        return loader.load_from_yahoo_finance(
+        return_dates = kwargs.get("return_dates", False)
+        result = loader.load_from_yahoo_finance(
             symbols=kwargs.get("symbols", []),
             start_date=kwargs.get("start_date"),
             end_date=kwargs.get("end_date"),
+            return_dates=return_dates,
         )
+        return result
     
     else:
         raise ValueError(f"Unknown data source: {source}")
